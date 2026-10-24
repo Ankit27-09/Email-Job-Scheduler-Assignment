@@ -1,0 +1,87 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum EmailStatus {
+  SCHEDULED
+  SENDING
+  SENT
+  FAILED
+}
+
+model User {
+  id        String     @id @default(uuid())
+  googleId  String     @unique
+  email     String     @unique
+  name      String
+  avatarUrl String?
+  createdAt DateTime   @default(now())
+  campaigns Campaign[]
+  emails    Email[]
+}
+
+// An SMTP identity emails are sent from (one Ethereal account each).
+model Sender {
+  id        String     @id @default(uuid())
+  name      String
+  email     String     @unique
+  smtpHost  String
+  smtpPort  Int
+  smtpUser  String
+  smtpPass  String
+  createdAt DateTime   @default(now())
+  campaigns Campaign[]
+  emails    Email[]
+}
+
+// One "Compose -> Schedule" action. Fans out into one Email row per recipient.
+model Campaign {
+  id          String   @id @default(uuid())
+  userId      String
+  senderId    String
+  subject     String
+  body        String
+  startAt     DateTime
+  delayMs     Int
+  hourlyLimit Int
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id])
+  sender      Sender   @relation(fields: [senderId], references: [id])
+  emails      Email[]
+}
+
+model Email {
+  id          String      @id @default(uuid())
+  campaignId  String
+  userId      String
+  senderId    String
+  recipient   String
+  subject     String
+  body        String
+  // Position inside the campaign, used to keep send order when jobs get pushed back.
+  sequence    Int
+  // Time originally requested vs. time currently planned (moves forward when rate limited).
+  requestedAt DateTime
+  scheduledAt DateTime
+  status      EmailStatus @default(SCHEDULED)
+  attempts    Int         @default(0)
+  sentAt      DateTime?
+  failedAt    DateTime?
+  error       String?
+  messageId   String?
+  previewUrl  String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  campaign    Campaign    @relation(fields: [campaignId], references: [id])
+  user        User        @relation(fields: [userId], references: [id])
+  sender      Sender      @relation(fields: [senderId], references: [id])
+
+  @@unique([campaignId, recipient])
+  @@index([userId, status, scheduledAt])
+  @@index([status, scheduledAt])
+}
