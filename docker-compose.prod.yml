@@ -1,0 +1,95 @@
+# Production stack for a single server.
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+# Postgres and Redis are not published to the host; only Caddy listens on 80/443.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: scheduler
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}
+      POSTGRES_DB: scheduler
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scheduler"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Applies pending Prisma migrations, then exits.
+  migrate:
+    build:
+      context: ./backend
+      target: build
+    image: scheduler-backend-tools
+    command: ["npx", "prisma", "migrate", "deploy"]
+    env_file: .env.production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: ./backend
+      target: runtime
+    image: scheduler-backend
+    restart: unless-stopped
+    env_file: .env.production
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./backend
+      target: runtime
+    image: scheduler-backend
+    restart: unless-stopped
+    command: ["node", "dist/worker.js"]
+    env_file: .env.production
+    # Lets in-flight sends finish on shutdown.
+    stop_grace_period: 30s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  web:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env.production}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - api
+
+volumes:
+  pg-data:
+  redis-data:
+  caddy-data:
+  caddy-config:
