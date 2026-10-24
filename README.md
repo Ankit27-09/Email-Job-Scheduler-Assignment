@@ -4,6 +4,8 @@ Schedule cold emails to a list of leads and have them sent at the right time, at
 
 The backend accepts a batch of emails, stores them in Postgres and turns each one into a delayed BullMQ job. A worker sends them through Ethereal SMTP while respecting a minimum gap between sends and an hourly limit. The React dashboard lets you log in with Google, compose and schedule emails, and watch them move from Scheduled to Sent.
 
+**Live:** https://outbox.ankitsingh.me
+
 **Demo video:** _add link here_
 
 **Stack:** TypeScript, Express 5, BullMQ + Redis, PostgreSQL (Prisma), Nodemailer/Ethereal · React 19, Vite, Tailwind CSS v4, TanStack Query · Docker Compose
@@ -247,10 +249,36 @@ Example `POST /api/emails/schedule` body:
 
 ---
 
+## Deployment
+
+The live version runs on a single AWS EC2 instance (t3.small, Amazon Linux 2023) with Docker Compose. `docker-compose.prod.yml` starts:
+
+- **postgres** and **redis** (AOF on), not exposed outside the Docker network
+- **migrate**, which runs `prisma migrate deploy` once and exits
+- **api** and **worker**, two containers from the same backend image
+- **web**: Caddy serving the React build and proxying `/api` and `/auth` to the API, with automatic HTTPS from Let's Encrypt
+
+Only ports 80 and 443 are open. The instance has an Elastic IP, and the domain points to it with an A record.
+
+To deploy on a fresh Amazon Linux 2023 host:
+
+```bash
+bash deploy/setup-server.sh                       # Docker, Compose, Buildx, swap
+cp deploy/.env.production.example .env.production # fill in domain, secrets, Google OAuth
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+docker compose -f docker-compose.prod.yml --env-file .env.production run --rm migrate npm run senders:create
+```
+
+For Google login, add `https://<domain>` as an authorised JavaScript origin and `https://<domain>/auth/google/callback` as a redirect URI.
+
+---
+
 ## Project layout
 
 ```
-docker-compose.yml        Postgres + Redis
+docker-compose.yml        Postgres + Redis for local development
+docker-compose.prod.yml   full production stack
+deploy/                   Caddyfile, server setup script, env template
 backend/
   prisma/schema.prisma    User, Sender, Campaign, Email
   scripts/                createSenders, loadTest
