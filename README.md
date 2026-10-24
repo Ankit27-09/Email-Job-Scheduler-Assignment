@@ -6,7 +6,7 @@ The backend accepts a batch of emails, stores them in Postgres and turns each on
 
 **Live:** https://outbox.ankitsingh.me
 
-**Demo video:** _add link here_
+**Demo video:** https://www.youtube.com/watch?v=sUWW0dUnMoE
 
 **Stack:** TypeScript, Express 5, BullMQ + Redis, PostgreSQL (Prisma), Nodemailer/Ethereal · React 19, Vite, Tailwind CSS v4, TanStack Query · Docker Compose
 
