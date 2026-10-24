@@ -85,15 +85,9 @@ The default delay is **at least 2 seconds between emails from the same sender**.
 
 ## How it works
 
-```
-Browser ─► Express API ─► Postgres (every email and its status)
-                │
-                └──────► BullMQ queue in Redis (one delayed job per email)
-                                   │
-                        Worker(s) ◄┴► Redis rate-limit counters
-                            │
-                            └──► Ethereal SMTP
-```
+![Architecture](docs/architecture.png)
+
+The API and the worker are separate processes that never call each other directly. The API writes emails to Postgres and queues jobs in Redis. The worker picks up due jobs from Redis, checks the rate limits, sends through Ethereal, and records the result in Postgres.
 
 ### Scheduling
 
@@ -122,6 +116,10 @@ Only the worker whose update actually changes the row is allowed to send. A plai
 The one case that can't be fully resolved is a crash after the SMTP server accepted the message but before the row was marked `SENT`. There's no way to know whether the email went out. Here the system picks **at-most-once**: when the stuck job is picked up again, the email is marked `FAILED` instead of being resent. For cold outreach, sending someone the same email twice is worse than missing one. Every message also gets a fixed `Message-ID` based on the email id, which would make a duplicate easy to spot.
 
 Ordinary SMTP errors (connection refused, timeout) put the email back to `SCHEDULED`, and BullMQ retries it with backoff. After the last attempt it's marked `FAILED` with the error message.
+
+The full path of a single email, including the rate-limit check and the claim:
+
+![Lifecycle of one scheduled email](docs/email-lifecycle.png)
 
 ### Rate limiting
 
